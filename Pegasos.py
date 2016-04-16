@@ -1,5 +1,6 @@
 import random
 import numpy as np
+import math
 from collections import Counter
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.cross_validation import StratifiedShuffleSplit
@@ -7,6 +8,7 @@ from sklearn.cross_validation import StratifiedShuffleSplit
 DELIMITER = ','
 ITERATIONS = "iterations"
 REGULARIZATION_CONST = "regularization_const"
+KERNEL_CONST = "kernel"
 
 # Represents a single data point
 class DataPoint:
@@ -16,9 +18,11 @@ class DataPoint:
 
 # Represent the binary classifier parameters
 class ClassifierParameters:
-	def __init__(self, theta):
+	def __init__(self, theta, Y=None):
 		self.theta = theta
+		self.Y = Y
 
+# Basic Pegasos algorithm mentioned in the Paper
 class PegasosClassifier:
 	def __init__(self):
 		# we'll be using One-vs-All method for multi-class classification
@@ -96,7 +100,114 @@ class PegasosClassifier:
 
 		#print "class predicted : ", prediction[1], " with confidence ", prediction[0]
 		return prediction[1]
+
+# Linear kernel
+def _linear(x1,x2):
+	return np.dot(x1,x2)
+
+# Gaussian kernel
+def _gaussian(x1,x2):
+	const_sigma = 0.1
+	differenceNorm = np.linalg.norm(x1-x2)
+	return (math.e) ** ( differenceNorm / (2*(const_sigma**2)) )
 	
+# Pegasos algorithm with kernel tricks
+class PegasosClassifierWithKernels():
+	def __init__(self):
+		# we'll be using One-vs-All method for multi-class classification
+		# each class will be a key in this dictionary and the value will be the parameters for that class
+		self.classifiers = {}
+		self.classLabels = []
+
+		# Default parameters for the algorithm, to be used in case the user does not explicitly provide them
+		self.DefaultRegularizationConst = 0.03
+		self.DefaultIterations = 100000
+
+		# are we dealing with binary classification problem?
+		self._isBinaryClassification = False
+		self.kernel = _linear
+		self.lmbda = self.DefaultRegularizationConst
+		self.T = self.DefaultIterations
+		self.X = []
+
+	# Y is the list of output for the given data,
+	# This function returns the unique class labels
+	def _uniqueClassLabels(self, Y):
+		return list(Counter(Y))
+
+	# train the classifier on the given data with given parameters
+	def fit(self, data, parameters):
+		if (data is None) or (len(data)==0):
+			print "Invalid training set"
+			return
+
+		self.T = int(parameters[ITERATIONS]) if ITERATIONS in parameters else self.DefaultIterations
+		self.lmbda = float(parameters[REGULARIZATION_CONST]) if REGULARIZATION_CONST in parameters else self.DefaultRegularizationConst
+		self.kernel = parameters[KERNEL_CONST] if KERNEL_CONST in parameters else _linear
+		self.classLabels = self._uniqueClassLabels([point.y for point in data])
+		self._isBinaryClassification = True if len(self.classLabels)==2 else False
+		self.X = [point.x for point in data]
+
+		dataLen = len(data)
+		for classLabel in self.classLabels:
+			# initialize the classifier theta's to 0 vector
+			Y = [1 if point.y==classLabel else -1 for point in data]
+			self.classifiers[classLabel] = ClassifierParameters( np.zeros((dataLen)) , Y )
+
+			# train the learner with single example till T iterations
+			for t in xrange(1,self.T+1):
+				i = random.randint(0, dataLen-1)
+				etaT = 1.0 / (self.lmbda * t)
+
+				xi = data[i].x
+				yi = 1 if data[i].y == classLabel else -1
+
+				comp = 0
+				for j in xrange(0, dataLen):
+					comp += self.classifiers[classLabel].theta[j] * yi * self.kernel(xi, data[j].x)
+
+				if (yi*etaT*comp) < 1.0:
+					self.classifiers[classLabel].theta[i] += 1
+
+			# training complete
+			print "Training complete for label : ", classLabel
+			print "Theta : ", self.classifiers[classLabel].theta
+
+			# Break after training one classifier for binary classification
+			if self._isBinaryClassification: break
+
+	# predict the class label for given input
+	def predict(self, x):
+		if len(self.classifiers) == 0:
+			print "Not trained yet"
+			return
+
+		predictions = []
+		if self._isBinaryClassification:
+			classOne, classTwo = self.classLabels[0], self.classLabels[1]
+
+			# while training we break the loop after training for the classOne
+			confidence = 0.0
+			for j in xrange(len(self.classifiers[classOne].Y)):
+				confidence += self.classifiers[classOne].theta[j] * self.classifiers[classOne].Y[j] * self.kernel(self.X[j], x)
+
+			predictedClass = classOne if confidence>0 else classTwo
+			prediction = (confidence, predictedClass)
+		else:
+			predictions = []
+			for classLabel in self.classifiers:
+				confidence = 0.0
+				for j in xrange(len(self.classifiers[classLabel].Y)):
+					confidence += self.classifiers[classLabel].theta[j] * self.classifiers[classLabel].Y[j] * self.kernel(self.X[j], x)
+
+				predictions.append( (confidence, classLabel) )
+
+			prediction = max(predictions)
+
+		#print "class predicted : ", prediction[1], " with confidence ", prediction[0]
+		return prediction[1]
+
+
 # returns data read from the file, treating each line as a data point
 # classLabelIndex denotes the zero based index of the column containing the class label
 def load_dataset(fileName, classLabelIndex):
@@ -146,7 +257,8 @@ def hypothesisEvaluation(classifier, testData):
 data = load_dataset("datasets/iris.data.txt", 4)
 trainData, testData = dataSplit(data, True)
 
-classifier = PegasosClassifier()
+#classifier = PegasosClassifier()
+classifier = PegasosClassifierWithKernels()
 parameters =  {}
 classifier.fit(trainData, parameters)
 
@@ -163,12 +275,14 @@ classifier.predict(np.array([5.9,3.0,5.1,1.8]))
 # Pegasos Learning Algorithm
 #	- DONE Basic Pegasos for binary classification
 # 	- DONE Multi class classification (one-vs-all)
-#	- Optional step for the parameters
-#	- Kernels
-#	- introduction of b (Pegasos measurements do not include this in their implementation)
+#	- SKIPPED Optional step for the parameters
+#	- Kernels (Fix the accuracy)
+#	- SKIPPED introduction of b (Pegasos measurements do not include this in their implementation)
 # Evaluation
 #	- Test/Train separation
 #	- Score: Accuracy, F1 score, Precision/Recall
 #	- KFold cross_validation
 # Optimizations
 #	- DONE Numpy arrays for better performance/memory consumption
+#	- Sparse vectors and dot product
+#	- Refactor the code for PegasosClassifier and PegasosClassifierWithKernels using inheritance
