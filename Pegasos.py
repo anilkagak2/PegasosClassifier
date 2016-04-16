@@ -21,10 +21,14 @@ class PegasosClassifier:
 		# we'll be using One-vs-All method for multi-class classification
 		# each class will be a key in this dictionary and the value will be the parameters for that class
 		self.classifiers = {}
+		self.classLabels = []
 
 		# Default parameters for the algorithm, to be used in case the user does not explicitly provide them
 		self.DefaultRegularizationConst = 0.03
 		self.DefaultIterations = 100000
+
+		# are we dealing with binary classification problem?
+		self._isBinaryClassification = False
 	
 	# dot product between the given vectors
 	def _dot(self, a, b):
@@ -60,10 +64,12 @@ class PegasosClassifier:
 		T = int(parameters[ITERATIONS]) if ITERATIONS in parameters else self.DefaultIterations
 		lmbda = float(parameters[REGULARIZATION_CONST]) if REGULARIZATION_CONST in parameters else self.DefaultRegularizationConst
 		
-		classes = self._uniqueClassLabels([point.y for point in data])
+		self.classLabels = self._uniqueClassLabels([point.y for point in data])
+		self._isBinaryClassification = True if len(self.classLabels)==2 else False
+
 		dataLen = len(data)
 		featureVectorLen = len( data[0].x )
-		for classLabel in classes:
+		for classLabel in self.classLabels:
 			# initialize the classifier theta's to 0 vector
 			self.classifiers[classLabel] = ClassifierParameters([0]*featureVectorLen)
 		
@@ -85,6 +91,9 @@ class PegasosClassifier:
 			# training complete
 			print "Training complete for label : ", classLabel
 			print "Theta : ", self.classifiers[classLabel].theta
+
+			# Break after training one classifier for binary classification
+			if self._isBinaryClassification: break
 		
 	# predict the class label for given input
 	def predict(self, x):
@@ -92,9 +101,18 @@ class PegasosClassifier:
 			print "Not trained yet"
 			return
 
-		predictions = [ (self._dot(self.classifiers[classLabel].theta, x), classLabel) for classLabel in self.classifiers ]
+		predictions = []
+		if self._isBinaryClassification:
+			classOne, classTwo = self.classLabels[0], self.classLabels[1]
 			
-		prediction = max(predictions)
+			# while training we break the loop after training for the classOne
+			confidence = self._dot(self.classifiers[classOne].theta, x)
+			predictedClass = classOne if confidence>0 else classTwo
+			prediction = (confidence, predictedClass)
+		else:
+			predictions = [ (self._dot(self.classifiers[classLabel].theta, x), classLabel) for classLabel in self.classifiers ]
+			prediction = max(predictions)
+
 		print "class predicted : ", prediction[1], " with confidence ", prediction[0]
 	
 # returns data read from the file, treating each line as a data point
@@ -139,7 +157,7 @@ clf.predict([5.9,3.0,5.1,1.8])
 
 # TODOs
 # Data normalization
-# Multi class classification (Done, use only one classifier for binary classification remaining)
+# DONE - Multi class classification (Done, use only one classifier for binary classification remaining)
 # Categorical variables
 # Kernels
 # Evaluation
