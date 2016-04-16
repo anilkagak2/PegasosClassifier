@@ -1,5 +1,8 @@
 import random
+import numpy as np
 from collections import Counter
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.cross_validation import StratifiedShuffleSplit
 
 DELIMITER = ','
 ITERATIONS = "iterations"
@@ -29,27 +32,7 @@ class PegasosClassifier:
 
 		# are we dealing with binary classification problem?
 		self._isBinaryClassification = False
-	
-	# dot product between the given vectors
-	def _dot(self, a, b):
-		if len(a) != len(b): 
-			print "Cannot perform dot product of the given vectors : ", a , b 
-			return
 
-		return sum(p*q for p,q in zip(a,b))
-	
-	# addition operator for given two vectors
-	def _add(self, a, b):
-		if len(a) != len(b): 
-			print "Cannot perform addition of the given vectors : ", a , b 
-			return
-			
-		return [p+q for p,q in zip(a,b)]
-	
-	# returns k*a where a is a vector and k is a scalar
-	def _scalarProduct(self, a, k):
-		return [k*p for p in a]
-	
 	# Y is the list of output for the given data,
 	# This function returns the unique class labels
 	def _uniqueClassLabels(self, Y):
@@ -71,7 +54,7 @@ class PegasosClassifier:
 		featureVectorLen = len( data[0].x )
 		for classLabel in self.classLabels:
 			# initialize the classifier theta's to 0 vector
-			self.classifiers[classLabel] = ClassifierParameters([0]*featureVectorLen)
+			self.classifiers[classLabel] = ClassifierParameters( np.zeros((featureVectorLen)) )
 		
 			# train the learner with single example till T iterations
 			for t in xrange(1,T+1):
@@ -81,12 +64,10 @@ class PegasosClassifier:
 				xi = data[i].x
 				yi = 1 if data[i].y == classLabel else -1
 			
-				if ( yi * self._dot(self.classifiers[classLabel].theta, xi)) < 1.0:
-					self.classifiers[classLabel].theta = self._add( \
-														self._scalarProduct(self.classifiers[classLabel].theta, 1.0- etaT*lmbda), \
-														self._scalarProduct(xi, etaT*yi) )
+				if ( yi * np.dot(self.classifiers[classLabel].theta, xi)) < 1.0:
+					self.classifiers[classLabel].theta = (1.0- etaT*lmbda)*self.classifiers[classLabel].theta + (etaT*yi)*xi
 				else:
-					self.classifiers[classLabel].theta = self._scalarProduct(self.classifiers[classLabel].theta, 1.0- etaT*lmbda)
+					self.classifiers[classLabel].theta = (1.0- etaT*lmbda)*self.classifiers[classLabel].theta
 				
 			# training complete
 			print "Training complete for label : ", classLabel
@@ -106,14 +87,15 @@ class PegasosClassifier:
 			classOne, classTwo = self.classLabels[0], self.classLabels[1]
 			
 			# while training we break the loop after training for the classOne
-			confidence = self._dot(self.classifiers[classOne].theta, x)
+			confidence = np.dot(self.classifiers[classOne].theta, x)
 			predictedClass = classOne if confidence>0 else classTwo
 			prediction = (confidence, predictedClass)
 		else:
-			predictions = [ (self._dot(self.classifiers[classLabel].theta, x), classLabel) for classLabel in self.classifiers ]
+			predictions = [ (np.dot(self.classifiers[classLabel].theta, x), classLabel) for classLabel in self.classifiers ]
 			prediction = max(predictions)
 
-		print "class predicted : ", prediction[1], " with confidence ", prediction[0]
+		#print "class predicted : ", prediction[1], " with confidence ", prediction[0]
+		return prediction[1]
 	
 # returns data read from the file, treating each line as a data point
 # classLabelIndex denotes the zero based index of the column containing the class label
@@ -128,7 +110,7 @@ def load_dataset(fileName, classLabelIndex):
 			features = line.split(DELIMITER)
 			x = features[ : classLabelIndex ] + features[ classLabelIndex+1 : ]
 			
-			x = [float(u) for u in x]
+			x = np.array( [float(u) for u in x] )
 			y = features[classLabelIndex]
 			data.append(DataPoint(x, y));
 
@@ -144,21 +126,49 @@ def dataSplit(data, randomShuffle):
 	test_data = data[trainDataSize : ]
 	return train_data, test_data	
 
+def accuracy(predictedValues, actualValues):
+	return sum([pv==av for pv,av in zip(predictedValues, actualValues)]) * 100.0 / len(predictedValues)
+
+# perform the hypothesis evaluation
+def hypothesisEvaluation(classifier, testData):
+	predictedValues = []
+	actualValues = []
+	for dataPoint in testData:
+		actualValues.append(dataPoint.y)
+		predictedValues.append(classifier.predict(dataPoint.x))
+
+	print "accuracy : ", accuracy(predictedValues, actualValues)
+	print "accuracy_score : ", accuracy_score(actualValues, predictedValues)
+	print "f1_score : ", f1_score(actualValues, predictedValues, average="macro")
+	print "precision_score : ", precision_score(actualValues, predictedValues, average="macro")
+	print "recall_score : ", recall_score(actualValues, predictedValues, average="macro")
+
 data = load_dataset("datasets/iris.data.txt", 4)
-train_data, test_data = dataSplit(data, True)
+trainData, testData = dataSplit(data, True)
 
-clf = PegasosClassifier()
+classifier = PegasosClassifier()
 parameters =  {}
-clf.fit(data, parameters)
+classifier.fit(trainData, parameters)
 
-clf.predict([4.4,2.9,1.4,0.2])
-clf.predict([5.0,2.3,3.3,1.0])
-clf.predict([5.9,3.0,5.1,1.8])
+hypothesisEvaluation(classifier, testData)
+
+classifier.predict(np.array([4.4,2.9,1.4,0.2]))
+classifier.predict(np.array([5.0,2.3,3.3,1.0]))
+classifier.predict(np.array([5.9,3.0,5.1,1.8]))
 
 # TODOs
-# Data normalization
-# DONE - Multi class classification (Done, use only one classifier for binary classification remaining)
-# Categorical variables
-# Kernels
+# Preprocessing
+#	- Data normalization
+#	- Categorical variables
+# Pegasos Learning Algorithm
+#	- DONE Basic Pegasos for binary classification
+# 	- DONE Multi class classification (one-vs-all)
+#	- Optional step for the parameters
+#	- Kernels
+#	- introduction of b (Pegasos measurements do not include this in their implementation)
 # Evaluation
-# Numpy arrays for better performance/memory consumption
+#	- Test/Train separation
+#	- Score: Accuracy, F1 score, Precision/Recall
+#	- KFold cross_validation
+# Optimizations
+#	- DONE Numpy arrays for better performance/memory consumption
