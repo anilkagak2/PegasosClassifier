@@ -6,12 +6,13 @@ from collections import Counter
 from sklearn import preprocessing
 from sklearn import svm
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from sklearn.cross_validation import StratifiedShuffleSplit
+from sklearn.cross_validation import KFold
 
 DELIMITER = ','
 ITERATIONS = "iterations"
 REGULARIZATION_CONST = "regularization_const"
 KERNEL_CONST = "kernel"
+NUM_FOLDS = 10
 
 # Represents a single data point
 class DataPoint:
@@ -35,7 +36,7 @@ class PegasosClassifier:
 		self.classLabels = []
 
 		# Default parameters for the algorithm, to be used in case the user does not explicitly provide them
-		self.DefaultRegularizationConst = 0.03
+		self.DefaultRegularizationConst = 0.003
 		self.DefaultIterations = 100000
 		self.lmbda = self.DefaultRegularizationConst
 		self.T = self.DefaultIterations
@@ -145,6 +146,7 @@ class PegasosClassifierWithKernels(PegasosClassifier):
 
 		# override the default iterations
 		self.DefaultIterations = 1000
+		self.DefaultRegularizationConst = 0.03
 
 		# kernel function pointer, used to calculate similarity between data points
 		self.kernel = _linear
@@ -217,11 +219,16 @@ def dataSplit(data, randomShuffle):
 def hypothesisEvaluation(classifier, testX, testY):
 	predictedValues = [ classifier.predict([x]) for x in testX ]
 
-	#print "predicted values : ", predictedValues
-	print "accuracy_score : ", 	accuracy_score(testY, predictedValues)
-	print "f1_score : ", 		f1_score(testY, predictedValues, average="macro")
-	print "precision_score : ", precision_score(testY, predictedValues, average="macro")
-	print "recall_score : ", 	recall_score(testY, predictedValues, average="macro")
+	accuracy = accuracy_score(testY, predictedValues)*100
+	f1 = f1_score(testY, predictedValues, average="macro")
+	precision = precision_score(testY, predictedValues, average="macro")
+	recall = recall_score(testY, predictedValues, average="macro")
+	#print "accuracy : ", accuracy
+	#print "f1_score : ", f1
+	#print "precision_score : ", precision
+	#print "recall_score : ", recall
+
+	return [accuracy, f1, precision, recall]
 
 # For each problem, read input -> normalize features -> train on classifier -> evaluate
 problems = [ ("datasets/iris.data.txt", 4), ("datasets/wine.data.txt", 0)]
@@ -231,29 +238,37 @@ for fileName, targetFeatureIndex in problems:
 
 	# Split the data into training and testing (random shuffle to remove the order available in the training data)
 	# Examples in one class are all together => random shuffle to mix the order
-	trainData, testData = dataSplit(data, True)
+	kf = KFold(len(data), n_folds=NUM_FOLDS, shuffle=True)
+	X = np.array( [point.x for point in data] )
+	Y = np.array( [point.y for point in data] )
+	evaluationScores = {"BasicPegasosClassifier" : [], "PegasosClassifierWithKernels" : [], "scikit-learn.svm.SVC" : []}
+	for train_index, test_index in kf:
+		trainX = X[train_index]
+		trainY = Y[train_index]
+		testX = X[test_index]
+		testY = Y[test_index]
 
-	# train, test (x,y)
-	trainX = np.array( [point.x for point in trainData] )
-	trainY = np.array( [point.y for point in trainData] )
-	testX = np.array( [point.x for point in testData] )
-	testY = np.array( [point.y for point in testData] )
+		# Normalize the input data
+		scaler = preprocessing.StandardScaler().fit(trainX)
+		trainX = scaler.transform(trainX)
+		testX = scaler.transform(testX)
 
-	# Normalize the input data
-	scaler = preprocessing.StandardScaler().fit(trainX)
-	trainX = scaler.transform(trainX)
-	testX = scaler.transform(testX)
+		classifiers = {}
+		classifiers["BasicPegasosClassifier"] = PegasosClassifier()
+		classifiers["PegasosClassifierWithKernels"] = PegasosClassifierWithKernels()
+		classifiers["scikit-learn.svm.SVC"] = svm.SVC()
 
-	classifiers = {}
-	classifiers["BasicPegasosClassifier"] = PegasosClassifier()
-	classifiers["PegasosClassifierWithKernels"] = PegasosClassifierWithKernels()
-	classifiers["scikit-learn.svm.SVC"] = svm.SVC()
+		for classifierName in classifiers:
+			#print "Getting stats for : ", classifierName
+			classifiers[classifierName].fit(trainX, trainY)
+			evaluationScores[classifierName].append( hypothesisEvaluation( classifiers[classifierName], testX, testY ) )
 
-	for classifierName in classifiers:
-		print "Stats : ", classifierName
-		classifiers[classifierName].fit(trainX, trainY)
-		hypothesisEvaluation( classifiers[classifierName], testX, testY )
-		print "---------------------"
+	print "Evaluation results : "
+	for classifierName in evaluationScores:
+		print "ClassifierName : ", classifierName
+		statsArray  = np.array( evaluationScores[classifierName] )
+		print "mean of the stats : ", np.mean(statsArray, axis=0)
+		print "median of the stats : ", np.median(statsArray, axis=0)
 
 # TODOs
 # Preprocessing
@@ -269,8 +284,8 @@ for fileName, targetFeatureIndex in problems:
 # Evaluation
 #	- DONE Test/Train separation
 #	- DONE Score: Accuracy, F1 score, Precision/Recall
-#	- KFold cross_validation
-#	- Publish numbers for standard SVC from scikit-learn, PegasosClassifier, PegasosClassifierWithKernels for Wine & Iris
+#	- DONE KFold cross_validation
+#	- DONE Publish numbers for standard SVC from scikit-learn, PegasosClassifier, PegasosClassifierWithKernels for Wine & Iris
 # Optimizations
 #	- DONE Numpy arrays for better performance/memory consumption
 #	- DONE Sparse vectors
