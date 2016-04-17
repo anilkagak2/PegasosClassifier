@@ -205,16 +205,6 @@ def load_dataset(fileName, classLabelIndex):
 
 	return data
 
-def dataSplit(data, randomShuffle):
-	# perform random shuffle of the data, so that we do not have the same class clustered at same point
-	if randomShuffle: random.shuffle(data)
-	
-	dataLen = len(data)
-	trainDataSize = int(0.9*dataLen)
-	train_data = data[ : trainDataSize]
-	test_data = data[trainDataSize : ]
-	return train_data, test_data	
-
 # perform the hypothesis evaluation
 def hypothesisEvaluation(classifier, testX, testY):
 	predictedValues = [ classifier.predict([x]) for x in testX ]
