@@ -1,8 +1,10 @@
 import random
 import numpy as np
-from scipy.sparse import dok_matrix
 import math
+from scipy.sparse import dok_matrix
 from collections import Counter
+from sklearn import preprocessing
+from sklearn import svm
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.cross_validation import StratifiedShuffleSplit
 
@@ -60,20 +62,20 @@ class PegasosClassifier:
 	# update the classifier for classLabel with ith data point (xi,yi)
 	def _updateClassifierWithDataPoint(self, classLabel, i, xi, yi, etaT):
 		if ( yi * np.dot(self.classifiers[classLabel].theta, xi)) < 1.0:
-			self.classifiers[classLabel].theta = (1.0- etaT*lmbda)*self.classifiers[classLabel].theta + (etaT*yi)*xi
+			self.classifiers[classLabel].theta = (1.0- etaT*self.lmbda)*self.classifiers[classLabel].theta + (etaT*yi)*xi
 		else:
-			self.classifiers[classLabel].theta = (1.0- etaT*lmbda)*self.classifiers[classLabel].theta
+			self.classifiers[classLabel].theta = (1.0- etaT*self.lmbda)*self.classifiers[classLabel].theta
 
 	# train the classifier on the given data with given parameters
-	def fit(self, data, parameters):
-		if (data is None) or (len(data)==0):
+	def fit(self, X, Y, parameters={}):
+		if (X is None) or (len(X)==0) or (Y is None) or (len(X) != len(Y)):
 			print "Invalid training set"
 			return
 
 		self._parseParameters(parameters)
 
-		dataLen = len(data)
-		featureVectorLen = len( data[0].x )
+		dataLen = len(X)
+		featureVectorLen = len( X[0] )
 		for classLabel in self.classLabels:
 			# initialize the classifier theta's to 0 vector
 			self.classifiers[classLabel] = self._defaultClassifierParameters(dataLen, featureVectorLen)
@@ -82,12 +84,12 @@ class PegasosClassifier:
 			for t in xrange(1,self.T+1):
 				i = random.randint(0, dataLen-1)
 				etaT = 1.0 / (self.lmbda * t)
-				xi = data[i].x
-				yi = 1 if data[i].y == classLabel else -1
+				xi = X[i]
+				yi = 1 if Y[i] == classLabel else -1
 				self._updateClassifierWithDataPoint(classLabel, i, xi, yi, etaT)
 
 			# training complete
-			print "Training complete for label : ", classLabel
+			#print "Training complete for label : ", classLabel
 			#print "Theta : ", self.classifiers[classLabel].theta
 
 			# Break after training one classifier for binary classification
@@ -98,28 +100,33 @@ class PegasosClassifier:
 		return (np.dot(self.classifiers[classLabel].theta, x), classLabel)
 
 	# predict the class label for given input
-	def predict(self, x):
+	def predict(self, X):
 		if len(self.classifiers) == 0:
 			print "Not trained yet"
 			return
 
-		predictions = []
-		if self._isBinaryClassification:
-			classOne, classTwo = self.classLabels[0], self.classLabels[1]
-
-			# while training we break the loop after training for the classOne
-			confidence, _ = self._classLabelConfidenceForInput(classOne, x)
-			predictedClass = classOne if confidence>0 else classTwo
-			prediction = (confidence, predictedClass)
-		else:
+		predictedValues = []
+		for x in X:
 			predictions = []
-			for classLabel in self.classifiers:
-				predictions.append( self._classLabelConfidenceForInput(classLabel, x) )
+			if self._isBinaryClassification:
+				classOne, classTwo = self.classLabels[0], self.classLabels[1]
 
-			prediction = max(predictions)
+				# while training we break the loop after training for the classOne
+				confidence, _ = self._classLabelConfidenceForInput(classOne, x)
+				predictedClass = classOne if confidence>0 else classTwo
+				prediction = (confidence, predictedClass)
+			else:
+				predictions = []
+				for classLabel in self.classifiers:
+					predictions.append( self._classLabelConfidenceForInput(classLabel, x) )
 
-		#print "class predicted : ", prediction[1], " with confidence ", prediction[0]
-		return prediction[1]
+				prediction = max(predictions)
+
+			#print "class predicted : ", prediction[1], " with confidence ", prediction[0]
+			predictedValues.append( prediction[1] )
+
+		# return the predicted values for all X
+		return predictedValues
 
 # Linear kernel
 def _linear(x1,x2):
@@ -206,54 +213,66 @@ def dataSplit(data, randomShuffle):
 	test_data = data[trainDataSize : ]
 	return train_data, test_data	
 
-def accuracy(predictedValues, actualValues):
-	return sum([pv==av for pv,av in zip(predictedValues, actualValues)]) * 100.0 / len(predictedValues)
-
 # perform the hypothesis evaluation
-def hypothesisEvaluation(classifier, testData):
-	predictedValues = []
-	actualValues = []
-	for dataPoint in testData:
-		actualValues.append(dataPoint.y)
-		predictedValues.append(classifier.predict(dataPoint.x))
+def hypothesisEvaluation(classifier, testX, testY):
+	predictedValues = [ classifier.predict([x]) for x in testX ]
 
-	print "accuracy : ", accuracy(predictedValues, actualValues)
-	print "accuracy_score : ", accuracy_score(actualValues, predictedValues)
-	print "f1_score : ", f1_score(actualValues, predictedValues, average="macro")
-	print "precision_score : ", precision_score(actualValues, predictedValues, average="macro")
-	print "recall_score : ", recall_score(actualValues, predictedValues, average="macro")
+	#print "predicted values : ", predictedValues
+	print "accuracy_score : ", 	accuracy_score(testY, predictedValues)
+	print "f1_score : ", 		f1_score(testY, predictedValues, average="macro")
+	print "precision_score : ", precision_score(testY, predictedValues, average="macro")
+	print "recall_score : ", 	recall_score(testY, predictedValues, average="macro")
 
-data = load_dataset("datasets/iris.data.txt", 4)
-trainData, testData = dataSplit(data, True)
+# For each problem, read input -> normalize features -> train on classifier -> evaluate
+problems = [ ("datasets/iris.data.txt", 4), ("datasets/wine.data.txt", 0)]
+for fileName, targetFeatureIndex in problems:
+	print "Dataset : ", fileName
+	data = load_dataset(fileName, targetFeatureIndex)
 
-#classifier = PegasosClassifier()
-classifier = PegasosClassifierWithKernels()
-parameters =  {}
-classifier.fit(trainData, parameters)
+	# Split the data into training and testing (random shuffle to remove the order available in the training data)
+	# Examples in one class are all together => random shuffle to mix the order
+	trainData, testData = dataSplit(data, True)
 
-hypothesisEvaluation(classifier, testData)
+	# train, test (x,y)
+	trainX = np.array( [point.x for point in trainData] )
+	trainY = np.array( [point.y for point in trainData] )
+	testX = np.array( [point.x for point in testData] )
+	testY = np.array( [point.y for point in testData] )
 
-classifier.predict(np.array([4.4,2.9,1.4,0.2]))
-classifier.predict(np.array([5.0,2.3,3.3,1.0]))
-classifier.predict(np.array([5.9,3.0,5.1,1.8]))
+	# Normalize the input data
+	scaler = preprocessing.StandardScaler().fit(trainX)
+	trainX = scaler.transform(trainX)
+	testX = scaler.transform(testX)
+
+	classifiers = {}
+	classifiers["BasicPegasosClassifier"] = PegasosClassifier()
+	classifiers["PegasosClassifierWithKernels"] = PegasosClassifierWithKernels()
+	classifiers["scikit-learn.svm.SVC"] = svm.SVC()
+
+	for classifierName in classifiers:
+		print "Stats : ", classifierName
+		classifiers[classifierName].fit(trainX, trainY)
+		hypothesisEvaluation( classifiers[classifierName], testX, testY )
+		print "---------------------"
 
 # TODOs
 # Preprocessing
-#	- Data normalization
-#	- Categorical variables
+#	- DONE Data normalization (uses scikit-learn preprocessing)
+#	- SKIPPED Categorical variables (can be done via scikit-learn preprocessing)
 # Pegasos Learning Algorithm
 #	- DONE Basic Pegasos for binary classification
 # 	- DONE Multi class classification (one-vs-all)
 #	- SKIPPED Optional step for the parameters
 #	- DONE Kernels (Fix the accuracy)
 #	- SKIPPED introduction of b (Pegasos measurements do not include this in their implementation)
+#	- DONE Make training method 'fit' to take similar arguments as SVC from scikit-learn
 # Evaluation
-#	- Test/Train separation
-#	- Score: Accuracy, F1 score, Precision/Recall
+#	- DONE Test/Train separation
+#	- DONE Score: Accuracy, F1 score, Precision/Recall
 #	- KFold cross_validation
 #	- Publish numbers for standard SVC from scikit-learn, PegasosClassifier, PegasosClassifierWithKernels for Wine & Iris
 # Optimizations
 #	- DONE Numpy arrays for better performance/memory consumption
 #	- DONE Sparse vectors
-#	- Sparse dot product
+#	- Sparse dot product for PegasosClassifierWithKernels
 #	- DONE Refactor the code for PegasosClassifier and PegasosClassifierWithKernels using inheritance
