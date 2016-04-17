@@ -1,5 +1,6 @@
 import random
 import numpy as np
+from scipy.sparse import dok_matrix
 import math
 from collections import Counter
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
@@ -18,8 +19,9 @@ class DataPoint:
 
 # Represent the binary classifier parameters
 class ClassifierParameters:
-	def __init__(self, theta, Y=None):
+	def __init__(self, theta, X=None, Y=None):
 		self.theta = theta
+		self.X = X
 		self.Y = Y
 
 # Basic Pegasos algorithm mentioned in the Paper
@@ -121,7 +123,7 @@ class PegasosClassifierWithKernels():
 
 		# Default parameters for the algorithm, to be used in case the user does not explicitly provide them
 		self.DefaultRegularizationConst = 0.03
-		self.DefaultIterations = 100000
+		self.DefaultIterations = 10000
 
 		# are we dealing with binary classification problem?
 		self._isBinaryClassification = False
@@ -141,8 +143,8 @@ class PegasosClassifierWithKernels():
 			print "Invalid training set"
 			return
 
-		self.T = int(parameters[ITERATIONS]) if ITERATIONS in parameters else self.DefaultIterations
-		self.lmbda = float(parameters[REGULARIZATION_CONST]) if REGULARIZATION_CONST in parameters else self.DefaultRegularizationConst
+		T = int(parameters[ITERATIONS]) if ITERATIONS in parameters else self.DefaultIterations
+		lmbda = float(parameters[REGULARIZATION_CONST]) if REGULARIZATION_CONST in parameters else self.DefaultRegularizationConst
 		self.kernel = parameters[KERNEL_CONST] if KERNEL_CONST in parameters else _linear
 		self.classLabels = self._uniqueClassLabels([point.y for point in data])
 		self._isBinaryClassification = True if len(self.classLabels)==2 else False
@@ -151,27 +153,32 @@ class PegasosClassifierWithKernels():
 		dataLen = len(data)
 		for classLabel in self.classLabels:
 			# initialize the classifier theta's to 0 vector
-			Y = [1 if point.y==classLabel else -1 for point in data]
-			self.classifiers[classLabel] = ClassifierParameters( np.zeros((dataLen)) , Y )
+			self.classifiers[classLabel] = ClassifierParameters( dok_matrix((1,dataLen)), {}, dok_matrix((1,dataLen)) )
 
 			# train the learner with single example till T iterations
-			for t in xrange(1,self.T+1):
+			for t in xrange(1,T+1):
 				i = random.randint(0, dataLen-1)
-				etaT = 1.0 / (self.lmbda * t)
+				etaT = 1.0 / (lmbda * t)
 
 				xi = data[i].x
 				yi = 1 if data[i].y == classLabel else -1
 
 				comp = 0
-				for j in xrange(0, dataLen):
-					comp += self.classifiers[classLabel].theta[j] * yi * self.kernel(xi, data[j].x)
+				for ((r,c),alpha) in self.classifiers[classLabel].theta.iteritems():
+					yj = self.classifiers[classLabel].Y[r,c]
+					xj = self.classifiers[classLabel].X[c]
+					comp += alpha * yj * self.kernel(xi, xj)
 
 				if (yi*etaT*comp) < 1.0:
-					self.classifiers[classLabel].theta[i] += 1
+					if self.classifiers[classLabel].theta[0,i] == 0.0:
+						self.classifiers[classLabel].X[i] = xi
+						self.classifiers[classLabel].Y[0,i] = yi
+
+					self.classifiers[classLabel].theta[0,i] += 1
 
 			# training complete
 			print "Training complete for label : ", classLabel
-			print "Theta : ", self.classifiers[classLabel].theta
+			#print "Theta : ", self.classifiers[classLabel].theta
 
 			# Break after training one classifier for binary classification
 			if self._isBinaryClassification: break
@@ -188,8 +195,10 @@ class PegasosClassifierWithKernels():
 
 			# while training we break the loop after training for the classOne
 			confidence = 0.0
-			for j in xrange(len(self.classifiers[classOne].Y)):
-				confidence += self.classifiers[classOne].theta[j] * self.classifiers[classOne].Y[j] * self.kernel(self.X[j], x)
+			for ((r,c),alpha) in self.classifiers[classOne].theta.iteritems():
+					yj = self.classifiers[classOne].Y[r,c]
+					xj = self.classifiers[classOne].X[c]
+					confidence += alpha * yj * self.kernel(x, xj)
 
 			predictedClass = classOne if confidence>0 else classTwo
 			prediction = (confidence, predictedClass)
@@ -197,8 +206,10 @@ class PegasosClassifierWithKernels():
 			predictions = []
 			for classLabel in self.classifiers:
 				confidence = 0.0
-				for j in xrange(len(self.classifiers[classLabel].Y)):
-					confidence += self.classifiers[classLabel].theta[j] * self.classifiers[classLabel].Y[j] * self.kernel(self.X[j], x)
+				for ((r,c),alpha) in self.classifiers[classLabel].theta.iteritems():
+					yj = self.classifiers[classLabel].Y[r,c]
+					xj = self.classifiers[classLabel].X[c]
+					confidence += alpha * yj * self.kernel(x, xj)
 
 				predictions.append( (confidence, classLabel) )
 
@@ -276,7 +287,7 @@ classifier.predict(np.array([5.9,3.0,5.1,1.8]))
 #	- DONE Basic Pegasos for binary classification
 # 	- DONE Multi class classification (one-vs-all)
 #	- SKIPPED Optional step for the parameters
-#	- Kernels (Fix the accuracy)
+#	- DONE Kernels (Fix the accuracy)
 #	- SKIPPED introduction of b (Pegasos measurements do not include this in their implementation)
 # Evaluation
 #	- Test/Train separation
@@ -284,5 +295,6 @@ classifier.predict(np.array([5.9,3.0,5.1,1.8]))
 #	- KFold cross_validation
 # Optimizations
 #	- DONE Numpy arrays for better performance/memory consumption
-#	- Sparse vectors and dot product
+#	- DONE Sparse vectors
+#	- Sparse dot product
 #	- Refactor the code for PegasosClassifier and PegasosClassifierWithKernels using inheritance
