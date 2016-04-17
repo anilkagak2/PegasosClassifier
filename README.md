@@ -22,6 +22,7 @@ Dataset :  datasets/iris.data.txt
 | scikit-learn.svm.SVC        | 96.67    | 0.97     | 0.98      | 0.98   |
 | BasicPegasos                | 86.67    | 0.86     | 0.89      | 0.88   |
 | PegasosWithKernels (linear) | 86.67    | 0.87     | 0.89      | 0.87   |
+| PegasosWithKernels(gaussian)| 90.00    | 0.90     | 0.92      | 0.90   |
 ---
 
 Dataset :  datasets/wine.data.txt
@@ -31,4 +32,5 @@ Dataset :  datasets/wine.data.txt
 | scikit-learn.svm.SVC        | 100      | 1.0      | 1.0       | 1.0    |
 | BasicPegasos                | 100      | 1.0      | 1.0       | 1.0    |
 | PegasosWithKernels (linear) | 100      | 1.0      | 1.0       | 1.0    |
+| PegasosWithKernels(gaussian)| 100      | 1.0      | 1.0       | 1.0    |
 --- 

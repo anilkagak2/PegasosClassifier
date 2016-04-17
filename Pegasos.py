@@ -29,7 +29,7 @@ class ClassifierParameters:
 
 # Basic Pegasos algorithm mentioned in the Paper
 class PegasosClassifier:
-	def __init__(self):
+	def __init__(self, parameters={}):
 		# we'll be using One-vs-All method for multi-class classification
 		# each class will be a key in this dictionary and the value will be the parameters for that class
 		self.classifiers = {}
@@ -43,6 +43,7 @@ class PegasosClassifier:
 
 		# are we dealing with binary classification problem?
 		self._isBinaryClassification = False
+		self._parseParameters(parameters)
 
 	# Parse the parameters dictionary passed by the user
 	def _parseParameters(self, parameters):
@@ -72,8 +73,6 @@ class PegasosClassifier:
 		if (X is None) or (len(X)==0) or (Y is None) or (len(X) != len(Y)):
 			print "Invalid training set"
 			return
-
-		self._parseParameters(parameters)
 
 		dataLen = len(X)
 		featureVectorLen = len( X[0] )
@@ -135,14 +134,14 @@ def _linear(x1,x2):
 
 # Gaussian kernel
 def _gaussian(x1,x2):
-	const_sigma = 0.1
+	const_sigma = 2
 	differenceNorm = np.linalg.norm(x1-x2)
-	return (math.e) ** ( differenceNorm / (2*(const_sigma**2)) )
+	return (math.e) ** ( -1.0 * differenceNorm / (2*(const_sigma**2)) )
 	
 # Pegasos algorithm with kernel tricks
 class PegasosClassifierWithKernels(PegasosClassifier):
-	def __init__(self):
-		PegasosClassifier.__init__(self)
+	def __init__(self, parameters={}):
+		PegasosClassifier.__init__(self, parameters)
 
 		# override the default iterations
 		self.DefaultIterations = 1000
@@ -150,6 +149,7 @@ class PegasosClassifierWithKernels(PegasosClassifier):
 
 		# kernel function pointer, used to calculate similarity between data points
 		self.kernel = _linear
+		self._parseParameters(parameters)
 
 	# Parse the parameters passed by user
 	def _parseParameters(self, parameters):
@@ -241,7 +241,7 @@ for fileName, targetFeatureIndex in problems:
 	kf = KFold(len(data), n_folds=NUM_FOLDS, shuffle=True)
 	X = np.array( [point.x for point in data] )
 	Y = np.array( [point.y for point in data] )
-	evaluationScores = {"BasicPegasosClassifier" : [], "PegasosClassifierWithKernels" : [], "scikit-learn.svm.SVC" : []}
+	evaluationScores = {"BasicPegasos" : [], "PegasosWithLinearKernel" : [], "PegasosWithGaussianKernel" : [], "scikit-learn.svm.SVC" : []}
 	for train_index, test_index in kf:
 		trainX = X[train_index]
 		trainY = Y[train_index]
@@ -254,8 +254,9 @@ for fileName, targetFeatureIndex in problems:
 		testX = scaler.transform(testX)
 
 		classifiers = {}
-		classifiers["BasicPegasosClassifier"] = PegasosClassifier()
-		classifiers["PegasosClassifierWithKernels"] = PegasosClassifierWithKernels()
+		classifiers["BasicPegasos"] = PegasosClassifier()
+		classifiers["PegasosWithLinearKernel"] = PegasosClassifierWithKernels()
+		classifiers["PegasosWithGaussianKernel"] = PegasosClassifierWithKernels(parameters={KERNEL_CONST: _gaussian})
 		classifiers["scikit-learn.svm.SVC"] = svm.SVC()
 
 		for classifierName in classifiers:
